@@ -3,7 +3,6 @@ const { chromium } = require('playwright');
 async function runTask() {
   console.log('✅ 开始执行 PCBeta 每日打卡任务...');
 
-  // 从环境变量读取 Cookie
   const cookieEnv = process.env.PC_BETA_COOKIES;
   if (!cookieEnv) {
     console.error('❌ 未设置 PC_BETA_COOKIES 环境变量');
@@ -34,7 +33,6 @@ async function runTask() {
   });
 
   try {
-    // 加载 Cookie
     await context.addCookies(cookies);
     const page = await context.newPage();
 
@@ -46,7 +44,7 @@ async function runTask() {
     await page.waitForTimeout(2000);
 
     // ==============================================
-    // 【智能判断】任务1：检查【立即申请】是否存在，不存在直接跳过
+    // 任务1：检查立即申请
     // ==============================================
     const task1Btn = page.locator('a.taskbtn[href*="do=apply&id=149"]');
     if (await task1Btn.count() > 0) {
@@ -58,7 +56,7 @@ async function runTask() {
     }
 
     // ==============================================
-    // 2. 进入任务进行中页面（任务2）
+    // 2. 进入任务进行中
     // ==============================================
     console.log('📌 进入任务进行中页面');
     await page.goto('https://i.pcbeta.com/home.php?mod=task&item=doing', { waitUntil: 'domcontentloaded' });
@@ -76,31 +74,31 @@ async function runTask() {
     if (await dakaList.count() >= 2) {
       await dakaList.nth(1).click();
     }
-    await page.waitForTimeout(3000);
-
-    // ==============================================
-    // 4. 点击第4个【回复】
-    // ==============================================
-    console.log('👉 点击第4个【回复】按钮');
-    const replyBtns = page.locator('a:has-text("回复"), button:has-text("回复")');
-    if (await replyBtns.count() >= 4) {
-      await replyBtns.nth(3).click();
-    }
-    await page.waitForTimeout(2000);
-
-    // ==============================================
-    // 5. 输入内容并提交回复
-    // ==============================================
-    console.log('✍️ 输入打卡内容：每日打卡签到');
-    await page.locator('textarea').first().fill('每日打卡签到');
-    await page.waitForTimeout(1000);
-
-    console.log('🚀 提交回复');
-    await page.click('input[value="参与/回复主题"], input[value="回复"], button:has-text("回复")', { timeout: 10000 });
     await page.waitForTimeout(4000);
 
     // ==============================================
-    // 6. 回到任务页面领取奖励
+    // 4. 滚动到页面底部 → 找到回复框（最稳方案）
+    // ==============================================
+    console.log('👉 定位底部快速回复框');
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.waitForTimeout(2000);
+
+    // ==============================================
+    // 5. 输入回复内容（修复版）
+    // ==============================================
+    console.log('✍️ 输入打卡内容：每日打卡签到');
+    await page.locator('#message').fill('每日打卡签到');
+    await page.waitForTimeout(1500);
+
+    // ==============================================
+    // 6. 提交回复（论坛最稳按钮）
+    // ==============================================
+    console.log('🚀 提交回复');
+    await page.click('button[type="submit"]:has-text("回复")');
+    await page.waitForTimeout(5000);
+
+    // ==============================================
+    // 7. 返回任务页领取奖励
     // ==============================================
     console.log('📌 返回任务页面');
     await page.goto('https://i.pcbeta.com/home.php?mod=task&item=doing', { waitUntil: 'domcontentloaded' });
@@ -108,9 +106,8 @@ async function runTask() {
 
     console.log('🎁 点击【领取奖励】');
     await page.click('a:has-text("领取奖励"), button:has-text("领取奖励")', { timeout: 10000 }).catch(() => {
-      console.log('ℹ️ 无需领取或已领取');
+      console.log('ℹ️ 奖励已领取或无需领取');
     });
-    await page.waitForTimeout(3000);
 
     console.log('🎉 全部任务执行完成！');
 
