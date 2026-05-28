@@ -1,167 +1,124 @@
 const { chromium } = require('playwright');
 
-const TARGET_URL = 'https://i.pcbeta.com/home.php?mod=task';
-const MAX_RETRIES = 3;
-const RETRY_DELAY = 2000;
+async function runTask() {
+  console.log('✅ 开始执行 PCBeta 每日打卡任务...');
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function parseCookies(cookieString) {
-  try {
-    return JSON.parse(cookieString);
-  } catch (e) {
-    console.log('Cookie JSON 解析失败，尝试解析字符串格式');
-    return cookieString.split(';').map(item => {
-      const [name, ...valueParts] = item.trim().split('=');
-      return {
-        name: name.trim(),
-        value: valueParts.join('=').trim(),
-        domain: '.pcbeta.com',
-        path: '/'
-      };
-    }).filter(cookie => cookie.name && cookie.value);
+  // 从环境变量读取 Cookie
+  const cookieEnv = process.env.PC_BETA_COOKIES;
+  if (!cookieEnv) {
+    console.error('❌ 未设置 PC_BETA_COOKIES 环境变量');
+    process.exit(1);
   }
-}
 
-async function runTask(retryCount = 0) {
-  console.log(`========================================`);
-  console.log(`[${new Date().toISOString()}] 开始执行 PCBeta 任务`);
-  console.log(`重试次数: ${retryCount}/${MAX_RETRIES}`);
-  console.log(`========================================`);
+  let cookies = [];
+  try {
+    const parsed = JSON.parse(cookieEnv);
+    cookies = parsed.cookies || parsed;
+  } catch (e) {
+    console.error('❌ Cookie 解析失败');
+    process.exit(1);
+  }
 
   const browser = await chromium.launch({
     headless: true,
     args: [
       '--no-sandbox',
-      '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
-      '--disable-web-security'
+      '--disable-gpu',
+      '--window-size=1920,1080'
     ]
   });
 
   const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    viewport: { width: 1920, height: 1080 }
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
   });
 
   try {
-    // 注入 Cookie
-    const cookiesString = process.env.PC_BETA_COOKIES;
-    if (!cookiesString) {
-      throw new Error('未配置 PC_BETA_COOKIES 环境变量，请在 GitHub Secrets 中设置');
-    }
-
-    const cookies = parseCookies(cookiesString);
-    console.log(`解析到 ${cookies.length} 个 Cookie`);
-    
+    // 加载 Cookie
     await context.addCookies(cookies);
-    console.log('Cookie 已注入');
-
     const page = await context.newPage();
 
-    // 启用控制台日志
-    page.on('console', msg => {
-      console.log(`[页面日志] ${msg.type()}: ${msg.text()}`);
-    });
+    // ==============================================
+    // 1. 打开任务页面
+    // ==============================================
+    console.log('📌 打开任务页面');
+    await page.goto('https://i.pcbeta.com/home.php?mod=task', { timeout: 60000, waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2000);
 
-    // 访问目标页面
-    console.log(`正在访问: ${TARGET_URL}`);
-    await page.goto(TARGET_URL, { 
-      waitUntil: 'networkidle',
-      timeout: 60000 
-    });
-    
-    console.log(`页面加载完成，标题: ${await page.title()}`);
-    console.log(`当前 URL: ${page.url()}`);
-
-    // 检查是否已登录
-    const pageContent = await page.content();
-    if (pageContent.includes('登录') && pageContent.includes('注册')) {
-      console.log('警告：页面检测到登录按钮，Cookie 可能已失效！');
+    // ==============================================
+    // 【智能判断】任务1：检查【立即申请】是否存在，不存在直接跳过
+    // ==============================================
+    const task1Btn = page.locator('a.taskbtn[href*="do=apply&id=149"]');
+    if (await task1Btn.count() > 0) {
+      console.log('👉 任务1：找到【立即申请】，开始执行');
+      await task1Btn.click({ timeout: 5000 });
+      await page.waitForTimeout(2000);
     } else {
-      console.log('登录状态验证通过');
+      console.log('ℹ️ 任务1：已申请过 / 无需申请，直接跳过');
     }
 
-    // 等待任务按钮出现
-    console.log('正在查找任务按钮...');
-    
-    // 选择器：class="taskbtn" 且 href 包含 task&do=apply
-    const buttonSelector = 'a.taskbtn[href*="task&do=apply"]';
-    
-    try {
-      await page.waitForSelector(buttonSelector, { timeout: 10000 });
-      console.log('找到"立即申请"按钮');
-    } catch (e) {
-      console.log('未找到标准选择器的按钮，尝试仅通过 class 查找...');
-      await page.waitForSelector('a.taskbtn', { timeout: 10000 });
-      console.log('通过 class 找到任务按钮');
+    // ==============================================
+    // 2. 进入任务进行中页面（任务2）
+    // ==============================================
+    console.log('📌 进入任务进行中页面');
+    await page.goto('https://i.pcbeta.com/home.php?mod=task&item=doing', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2000);
+
+    console.log('👉 点击【回帖打卡福利】');
+    await page.click('a:has-text("回帖打卡福利")', { timeout: 10000 });
+    await page.waitForTimeout(3000);
+
+    // ==============================================
+    // 3. 点击第2个【打卡专用】
+    // ==============================================
+    console.log('👉 点击第2个【打卡专用】');
+    const dakaList = page.locator('a:has-text("打卡专用")');
+    if (await dakaList.count() >= 2) {
+      await dakaList.nth(1).click();
     }
+    await page.waitForTimeout(3000);
 
-    // 获取所有任务按钮
-    const buttons = await page.$$('a.taskbtn');
-    console.log(`找到 ${buttons.length} 个任务按钮`);
-
-    // 遍历按钮并点击
-    for (let i = 0; i < buttons.length; i++) {
-      const button = buttons[i];
-      const href = await button.getAttribute('href');
-      const text = await button.textContent();
-      
-      console.log(`按钮 ${i + 1}: 文本="${text.trim()}", href=${href}`);
-      
-      if (href && href.includes('task&do=apply')) {
-        console.log(`正在点击按钮: ${text.trim()}`);
-        
-        // 点击按钮
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: 'networkidle', timeout: 30000 }).catch(() => {}),
-          button.click({ force: true })
-        ]);
-        
-        console.log('按钮点击完成');
-        await sleep(2000);
-        
-        // 返回任务列表页
-        if (!page.url().includes('mod=task')) {
-          console.log('返回任务列表页');
-          await page.goto(TARGET_URL, { waitUntil: 'networkidle', timeout: 60000 });
-        }
-      }
+    // ==============================================
+    // 4. 点击第4个【回复】
+    // ==============================================
+    console.log('👉 点击第4个【回复】按钮');
+    const replyBtns = page.locator('a:has-text("回复"), button:has-text("回复")');
+    if (await replyBtns.count() >= 4) {
+      await replyBtns.nth(3).click();
     }
+    await page.waitForTimeout(2000);
 
-    console.log('========================================');
-    console.log('任务执行完成！');
-    console.log('========================================');
+    // ==============================================
+    // 5. 输入内容并提交回复
+    // ==============================================
+    console.log('✍️ 输入打卡内容：每日打卡签到');
+    await page.locator('textarea').first().fill('每日打卡签到');
+    await page.waitForTimeout(1000);
+
+    console.log('🚀 提交回复');
+    await page.click('input[value="参与/回复主题"], input[value="回复"], button:has-text("回复")', { timeout: 10000 });
+    await page.waitForTimeout(4000);
+
+    // ==============================================
+    // 6. 回到任务页面领取奖励
+    // ==============================================
+    console.log('📌 返回任务页面');
+    await page.goto('https://i.pcbeta.com/home.php?mod=task&item=doing', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2000);
+
+    console.log('🎁 点击【领取奖励】');
+    await page.click('a:has-text("领取奖励"), button:has-text("领取奖励")', { timeout: 10000 }).catch(() => {
+      console.log('ℹ️ 无需领取或已领取');
+    });
+    await page.waitForTimeout(3000);
+
+    console.log('🎉 全部任务执行完成！');
 
   } catch (error) {
-    console.error('========================================');
-    console.error('任务执行出错:', error.message);
-    console.error('========================================');
-    
-    if (retryCount < MAX_RETRIES) {
-      console.log(`${RETRY_DELAY / 1000}秒后进行第 ${retryCount + 1} 次重试...`);
-      await browser.close();
-      await sleep(RETRY_DELAY);
-      return runTask(retryCount + 1);
-    } else {
-      console.log('已达最大重试次数，任务失败');
-      // 保存失败截图和追踪
-      if (context.pages().length > 0) {
-        const page = context.pages()[0];
-        await page.screenshot({ path: 'error-screenshot.png', fullPage: true });
-        await context.trace({ path: 'trace.zip' });
-      }
-      throw error;
-    }
+    console.error('❌ 执行失败:', error.message);
   } finally {
     await browser.close();
   }
 }
 
-// 执行任务
-runTask().catch(error => {
-  console.error('程序异常退出:', error);
-  process.exit(1);
-});
+runTask();
