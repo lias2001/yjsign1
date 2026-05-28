@@ -1,60 +1,52 @@
-name: PCBeta Daily Task Automation
+name: PCBeta 每日打卡 08:00
 
 on:
-# 每日 北京时间 早上 8:00 自动运行
   schedule:
-    cron: '0 0 * * *'
-  # 手动触发入口
-  workflow_dispatch:
+    - cron: '0 0 * * *'    # 每天 北京时间 08:00 运行
+  workflow_dispatch:       # 允许手动测试运行
 
 jobs:
-  run-pcbeta-task:
+  run-task:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout code
+      - name: 检出代码
         uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      
-      - name: Cache npm dependencies
+
+      # ==============================================
+      # 缓存 Node.js 依赖（第一次安装，后续秒速）
+      # ==============================================
+      - name: 缓存 Node 依赖
         uses: actions/cache@v4
-        id: npm-cache
         with:
-          path: node_modules
+          path: |
+            ~/.npm
+            node_modules
           key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-node-
-      
-      - name: Install npm dependencies
-        if: steps.npm-cache.outputs.cache-hit != 'true'
-        run: npm install
-      
-      - name: Cache Playwright browsers
+
+      # ==============================================
+      # 缓存 Playwright 浏览器（避免每次重装）
+      # ==============================================
+      - name: 缓存 Playwright 浏览器
         uses: actions/cache@v4
-        id: playwright-cache
         with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-playwright-
-      
-      - name: Install Playwright browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
+          path: |
+            ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package.json') }}
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 安装依赖（缓存存在时极快）
+        run: npm install
+
+      - name: 安装浏览器（缓存存在时自动跳过）
         run: npx playwright install chromium --with-deps
-      
-      - name: Run PCBeta Task Automation
+
+      - name: 运行打卡任务
         env:
           PC_BETA_COOKIES: ${{ secrets.PC_BETA_COOKIES }}
         run: node scripts/pcbeta-task.js
-      
-      - name: Upload Playwright traces on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-traces
-          path: trace.zip
-          retention-days: 7
