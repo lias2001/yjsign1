@@ -63,47 +63,46 @@ async function runTask() {
     await page.waitForTimeout(3000);
     console.log('🌐 任务2页面URL:', page.url());
 
-    // ==============================================
-    // 🔥 终极修复：确保一定点到第2个【打卡专用】
-    // ==============================================
-    console.log('👉 开始定位第2个【打卡专用】...');
-    
-    // 等待链接出现
-    const dakaTarget = page.locator('a:has-text("打卡专用")').nth(1);
-    await dakaTarget.waitFor({ state: 'visible', timeout: 10000 });
-    
-    // 滚动到元素位置
-    await dakaTarget.scrollIntoViewIfNeeded();
-    
-    // 强制点击
-    await dakaTarget.click({ force: true, timeout: 10000 });
-    
-    // 等待页面跳转
+    // 4. 定位第2个【加粗打卡专用】链接
+    console.log('👉 定位第2个【加粗打卡专用】链接...');
+    const dakaItems = page.locator('a:has(strong:has-text("打卡专用"))');
+    const count = await dakaItems.count();
+    console.log(`ℹ️ 页面找到打卡专用链接数量：${count}`);
+
+    if (count >= 2) {
+      const target = dakaItems.nth(1);
+      await target.waitFor({ state: 'visible', timeout: 10000 });
+      await target.scrollIntoViewIfNeeded();
+      await target.click({ force: true });
+    } else {
+      const target = dakaItems.first();
+      await target.waitFor({ state: 'visible', timeout: 10000 });
+      await target.scrollIntoViewIfNeeded();
+      await target.click({ force: true });
+    }
+
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(4000);
-    
     console.log('🌐 已进入打卡帖子页面URL:', page.url());
+
     // ==============================================
+    // ✅ 任务4、5：底部快速回复框（你给的HTML精准定位）
+    // ==============================================
+    console.log('👉 滚动到页面最底部');
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.waitForTimeout(2000);
 
-    // 4. 点击第4个【回复】
-    console.log('👉 点击第4个【回复】按钮');
-    const replyBtns = page.locator('a:has-text("回复"), button:has-text("回复")');
-    await replyBtns.nth(3).waitFor({ state: 'visible', timeout: 10000 });
-    await replyBtns.nth(3).click({ force: true });
-    await page.waitForTimeout(3000);
-
-    // 5. 弹窗回复
-    console.log('✅ 等待回复弹窗');
-    await page.waitForSelector('.dialog', { timeout: 15000 });
-    
-    console.log('✍️ 输入打卡内容');
-    await page.locator('.dialog textarea').fill('每日打卡签到');
+    // 输入框：#fastpostmessage
+    console.log('✍️ 输入打卡内容：每日打卡签到');
+    await page.locator('#fastpostmessage').fill('每日打卡签到');
     await page.waitForTimeout(1500);
 
-    console.log('🚀 提交回复');
-    await page.click('.dialog input[value="参与/回复主题"]', { force: true });
-    await page.waitForTimeout(5000);
+    // 发表按钮：#fastpostsubmit
+    console.log('🚀 点击【发表回复】');
+    await page.locator('#fastpostsubmit').click({ force: true });
+    await page.waitForTimeout(6000);
 
+    // ==============================================
     // 6. 返回任务页领取奖励
     console.log('📌 返回任务页面');
     await page.goto('https://i.pcbeta.com/home.php?mod=task&item=doing');
@@ -112,7 +111,7 @@ async function runTask() {
 
     console.log('🎁 点击【领取奖励】');
     await page.click('a:has-text("领取奖励")', { timeout: 10000 }).catch(() => {
-      console.log('ℹ️ 奖励已领取');
+      console.log('ℹ️ 奖励已领取或无需领取');
     });
 
     console.log('🎉 全部任务执行完成！');
