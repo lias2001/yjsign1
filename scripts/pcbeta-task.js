@@ -36,12 +36,12 @@ async function runTask() {
     await context.addCookies(cookies);
     const page = await context.newPage();
 
-    // 1. 打开任务页面
+    // 1. 任务首页
     console.log('📌 打开任务页面');
     await page.goto('https://i.pcbeta.com/home.php?mod=task', { timeout: 60000, waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
 
-    // 任务1：检查立即申请
+    // 任务1：有“立即申请”就点，没有就跳过
     const task1Btn = page.locator('a.taskbtn[href*="do=apply&id=149"]');
     if (await task1Btn.count() > 0) {
       console.log('👉 任务1：找到【立即申请】，点击');
@@ -56,50 +56,57 @@ async function runTask() {
     await page.goto('https://i.pcbeta.com/home.php?mod=task&item=doing');
     await page.waitForTimeout(2000);
 
-    console.log('👉 点击【回帖打卡福利】');
+    // ---------- 任务2：点击【回帖打卡福利】并打印URL ----------
+    console.log('👉 任务2：点击【回帖打卡福利】');
     await page.click('a:has-text("回帖打卡福利")');
     await page.waitForTimeout(3000);
+    console.log('🌐 任务2跳转后URL:', page.url()); // 打印跳转后的网址
 
-    // 3. 点击第2个打卡专用
+    // 第2个打卡专用
     console.log('👉 点击第2个【打卡专用】');
     const dakaList = page.locator('a:has-text("打卡专用")');
     if (await dakaList.count() >= 2) {
       await dakaList.nth(1).click();
     }
     await page.waitForTimeout(4000);
+    console.log('🌐 进入打卡专用页URL:', page.url()); // 打印打卡帖URL
 
-    // 4. 点击第4个【回复】按钮（打开弹窗）
+    // 第4个回复按钮（弹出窗口）
     console.log('👉 点击第4个【回复】按钮（打开弹窗）');
-    const replyBtns = page.locator('a:has-text("回复"), button:has-text("回复")');
+    const replyBtns = page.locator('a:has-text("回复")');
     if (await replyBtns.count() >= 4) {
       await replyBtns.nth(3).click();
     }
     await page.waitForTimeout(3000);
 
-    // 5. 等待弹窗出现 → 输入内容（修复核心）
-    console.log('✅ 等待回复弹窗加载');
-    await page.waitForSelector('textarea', { timeout: 10000 });
-    await page.waitForSelector('textarea:not([disabled])', { timeout: 10000 });
+    // 回复弹窗（精准定位 .dialog）
+    console.log('✅ 等待回复弹窗出现');
+    await page.waitForSelector('.dialog', { timeout: 10000 });
+    const dialogTextarea = page.locator('.dialog textarea');
+    await dialogTextarea.waitFor({ state: 'visible', timeout: 10000 });
 
     console.log('✍️ 输入：每日打卡签到');
-    const textarea = page.locator('textarea').last();
-    await textarea.fill('每日打卡签到');
+    await dialogTextarea.fill('每日打卡签到');
     await page.waitForTimeout(1500);
 
-    // 6. 提交回复
     console.log('🚀 点击【参与/回复主题】');
-    await page.click('input[value="参与/回复主题"], button[type="submit"]:has-text("回复")');
+    const dialogSubmit = page.locator('.dialog input[value="参与/回复主题"]');
+    await dialogSubmit.click();
     await page.waitForTimeout(5000);
+    // -------------------------------------------------------------------
 
-    // 7. 领取奖励
-    console.log('📌 返回任务页面');
+    // ---------- 任务3：返回任务页、点击领取奖励并打印URL ----------
+    console.log('📌 返回任务进行中页面');
     await page.goto('https://i.pcbeta.com/home.php?mod=task&item=doing');
     await page.waitForTimeout(2000);
+    console.log('🌐 任务3当前页面URL:', page.url()); // 打印任务页URL
 
-    console.log('🎁 点击【领取奖励】');
+    console.log('🎁 任务3：点击【领取奖励】');
     await page.click('a:has-text("领取奖励")', { timeout: 10000 }).catch(() => {
-      console.log('ℹ️ 奖励已领取');
+      console.log('ℹ️ 奖励已领取或不存在');
     });
+    await page.waitForTimeout(2000);
+    console.log('🌐 领取奖励后URL:', page.url()); // 打印领奖后URL
 
     console.log('🎉 全部任务执行完成！');
 
