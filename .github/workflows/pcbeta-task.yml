@@ -1,0 +1,61 @@
+name: PCBeta Daily Task Automation
+
+on:
+  schedule:
+    # 北京时间 3:00 = UTC 19:00
+    - cron: '0 19 * * *'
+  
+  # 支持手动触发
+  workflow_dispatch:
+
+jobs:
+  run-pcbeta-task:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        id: npm-cache
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+      
+      - name: Install npm dependencies
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        run: npm install
+      
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+      
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install chromium --with-deps
+      
+      - name: Run PCBeta Task Automation
+        env:
+          PC_BETA_COOKIES: ${{ secrets.PC_BETA_COOKIES }}
+        run: node scripts/pcbeta-task.js
+      
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: trace.zip
+          retention-days: 7
