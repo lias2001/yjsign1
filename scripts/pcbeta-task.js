@@ -41,11 +41,11 @@ async function runTask() {
     await page.goto('https://i.pcbeta.com/home.php?mod=task', { timeout: 60000 });
     await page.waitForTimeout(2000);
 
-    // 任务1：有立即申请就点，没有跳过
-    const task1Btn = page.locator('a.taskbtn[href*="do=apply&id=149"]');
+    // 任务1：识别并点击两种立即申请，没有则跳过
+    const task1Btn = page.locator('a.taskbtn[href*="do=apply"]');
     if (await task1Btn.count() > 0) {
-      console.log('👉 任务1：点击【立即申请】');
-      await task1Btn.click({ timeout: 5000 });
+      console.log('👉 任务1：找到【立即申请】，执行点击');
+      await task1Btn.first().click({ timeout: 5000 });
       await page.waitForTimeout(2000);
     } else {
       console.log('ℹ️ 任务1：已完成，跳过');
