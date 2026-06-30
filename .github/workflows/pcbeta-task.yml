@@ -5,7 +5,7 @@ on:
     - cron: '0 21 * * *'   # 北京时间 05:00 执行
     - cron: '30 21 * * *'  # 北京时间 05:30 执行
   workflow_dispatch:       # 允许手动测试运行
-  
+
 jobs:
   run-task:
     runs-on: ubuntu-latest
@@ -13,9 +13,7 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      # ==============================================
-      # 缓存 Node.js 依赖（第一次安装，后续秒速）
-      # ==============================================
+      # 缓存 Node.js 依赖
       - name: 缓存 Node 依赖
         uses: actions/cache@v4
         with:
@@ -26,9 +24,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-node-
 
-      # ==============================================
-      # 缓存 Playwright 浏览器（避免每次重装）
-      # ==============================================
+      # 缓存 Playwright 浏览器
       - name: 缓存 Playwright 浏览器
         uses: actions/cache@v4
         with:
@@ -41,13 +37,24 @@ jobs:
         with:
           node-version: 20
 
-      - name: 安装依赖（缓存存在时极快）
+      - name: 安装依赖
         run: npm install
 
-      - name: 安装浏览器（缓存存在时自动跳过）
+      - name: 安装浏览器
         run: npx playwright install chromium --with-deps
 
       - name: 运行打卡任务
         env:
           PC_BETA_COOKIES: ${{ secrets.PC_BETA_COOKIES }}
         run: node scripts/pcbeta-task.js
+
+      # ==============================================
+      # ✅ 上传截图到 GitHub Artifacts
+      # ==============================================
+      - name: 上传点击截图
+        if: always()   # 成功失败都上传
+        uses: actions/upload-artifact@v4
+        with:
+          name: 点击截图-${{ github.run_number }}
+          path: screenshots/
+          retention-days: 30   # 保留30天
