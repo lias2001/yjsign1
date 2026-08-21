@@ -1,21 +1,16 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
-const path = require('path');
 
 let snapCounter = 1;
 
-// 截图工具：红点标记，数字序列命名 snap_001.png
 async function screenshotWithMouseMarker(page) {
-    // 鼠标移到屏幕中心
     await page.mouse.move(960, 540);
     const pos = await page.mouse.position();
     const x = Math.round(pos.x);
     const y = Math.round(pos.y);
-
     const filename = `snap_${String(snapCounter).padStart(3, '0')}.png`;
     snapCounter++;
 
-    // 绘制红色圆点
     await page.evaluate((mx, my) => {
         const oldDot = document.getElementById('__mouse_red_dot');
         if (oldDot) oldDot.remove();
@@ -39,27 +34,18 @@ async function screenshotWithMouseMarker(page) {
 
     await page.evaluate(() => {
         const d = document.getElementById('__mouse_red_dot');
-        if (d) d.remove();
+        if (d) d?.remove();
     });
 }
 
 async function runTask() {
-    // 重置截图计数器
     snapCounter = 1;
-
-    // 清理历史旧截图 snap_*.png
     try {
         const allFiles = fs.readdirSync('.');
         const oldScreenshots = allFiles.filter(f => f.startsWith('snap_') && f.endsWith('.png'));
-        for (const f of oldScreenshots) {
-            fs.unlinkSync(f);
-        }
-        if (oldScreenshots.length > 0) {
-            console.log(`🧹 清理历史截图 ${oldScreenshots.length} 个`);
-        }
-    } catch (e) {
-        console.log('ℹ️ 无旧截图可清理');
-    }
+        for (const f of oldScreenshots) fs.unlinkSync(f);
+        if (oldScreenshots.length > 0) console.log(`🧹 清理历史截图 ${oldScreenshots.length} 个`);
+    } catch (e) { console.log('ℹ️ 无旧截图可清理'); }
 
     console.log('✅ 开始执行 PCBeta 每日打卡任务...');
     const cookieEnv = process.env.PC_BETA_COOKIES;
@@ -93,17 +79,18 @@ async function runTask() {
         await context.addCookies(cookies);
         const page = await context.newPage();
 
-        // 🔥 执行 2 轮
         for (let round = 1; round <= 2; round++) {
             console.log(`\n========== 第 ${round} 轮开始 ==========`);
-            // 1. 打开任务 new 页面【任务1页面，加载完成立刻截图（点击之前）】
             console.log('📌 打开任务1页面 ');
-            await page.goto('https://i.pcbeta.com/home.php?mod=task&item=new', { timeout: 60000 });
-            await page.waitForTimeout(20000);
-            // 进入任务1页面时截图
+            // waitUntil 等待网络空闲，处理302重定向
+            await page.goto('https://i.pcbeta.com/home.php?mod=task&item=new', {
+                timeout: 60000,
+                waitUntil: 'networkidle'
+            });
+            // 【关键】页面加载完成立刻截图，放在sleep前面，就算发生重定向，先截图
             await screenshotWithMouseMarker(page);
+            await page.waitForTimeout(8000);
 
-            // ✅ 任务 1：兼容 id=1~1000 的所有立即申请
             const task1Btns = page.locator('a.taskbtn[href*="do=apply&id="]');
             const task1Count = await task1Btns.count();
             if (task1Count > 0) {
@@ -119,22 +106,32 @@ async function runTask() {
                 console.log('ℹ️ 任务 1：全部已完成，跳过 ');
             }
 
-            // 2. 进入任务进行中
             console.log('📌 进入任务进行中页面 ');
-            await page.goto('https://i.pcbeta.com/home.php?mod=task&item=doing');
-            await page.waitForTimeout(2000);
-
-            // 3. 跳转任务2页面，加载完成立刻截图（点击之后页面跳转完成，截图）
-            console.log('👉 点击【回帖打卡福利】');
-            await page.click('a:has-text("回帖打卡福利")', { timeout: 10000 });
-            await page.waitForLoadState('domcontentloaded');
+            await page.goto('https://i.pcbeta.com/home.php?mod=task&item=doing', {
+                timeout: 60000,
+                waitUntil: 'networkidle'
+            });
             await page.waitForTimeout(3000);
+
+            // 使用 getByText，忽略前后空白
+            const linkLocator = page.getByText('回帖打卡福利', { exact: false });
+            try {
+                console.log('👉 等待【回帖打卡福利】元素');
+                await linkLocator.waitFor({ timeout: 15000, state: 'visible' });
+                console.log('👉 点击【回帖打卡福利】');
+                await linkLocator.click({ timeout: 15000 });
+            } catch(err) {
+                // 找不到链接时也截图，保存现场，不直接崩溃退出整轮
+                console.error('⚠️ 找不到【回帖打卡福利】链接，本轮继续，保存现场截图', err.message);
+                await screenshotWithMouseMarker(page);
+                continue;
+            }
+
+            await page.waitForLoadState('domcontentloaded');
+            await page.waitForTimeout(4000);
             console.log('🌐 任务2页面 URL:', page.url());
-            // 进入任务2页面时截图
             await screenshotWithMouseMarker(page);
 
-            // 4. 定位第 2 个【加粗打卡专用】链接
-            console.log('👉 定位第 2 个【加粗打卡专用】链接...');
             const dakaItems = page.locator('a:has(strong:has-text("打卡专用"))');
             const count = await dakaItems.count();
             console.log(`ℹ️ 页面找到打卡专用链接数量：${count}`);
@@ -150,28 +147,34 @@ async function runTask() {
                 await target.click({ force: true });
             } else {
                 console.log('⚠️ 未找到打卡专用链接，跳过本轮 ');
+                await screenshotWithMouseMarker(page);
                 continue;
             }
+
             await page.waitForLoadState('domcontentloaded');
             await page.waitForTimeout(4000);
             console.log('🌐 已进入打卡帖子页面 URL:', page.url());
 
-            // 滚动到底部，快速回复
             console.log('👉 滚动到页面最底部 ');
             await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
             await page.waitForTimeout(2000);
+
             console.log('✍️ 输入打卡内容：每日打卡签到 ');
             await page.locator('#fastpostmessage').fill('每日打卡签到');
             await page.waitForTimeout(1500);
+
             console.log('🚀 点击【发表回复】');
-            await page.locator('#fastpostsubmit').click({ force: true });
+            await page.locator('#fastpostsubmit').click({ force: true, timeout:10000 });
             await page.waitForTimeout(6000);
 
-            // 返回任务页领取奖励
             console.log('📌 返回任务页面 ');
-            await page.goto('https://i.pcbeta.com/home.php?mod=task&item=doing');
+            await page.goto('https://i.pcbeta.com/home.php?mod=task&item=doing', {
+                timeout:60000,
+                waitUntil:'networkidle'
+            });
             await page.waitForTimeout(2000);
             console.log('🌐 返回后 URL:', page.url());
+
             console.log('🎁 点击【领取奖励】');
             await page.click('a:has-text("领取奖励")', { timeout: 10000 }).catch(() => {
                 console.log('ℹ️ 奖励已领取或无需领取 ');
@@ -186,6 +189,8 @@ async function runTask() {
         console.log('\n🎉 全部 2 轮任务执行完成！');
     } catch (error) {
         console.error('❌ 执行失败:', error.message);
+        // 全局异常也要尝试截图保存现场
+        try { await screenshotWithMouseMarker(page); } catch(e) {}
     } finally {
         await browser.close();
     }
