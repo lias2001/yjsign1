@@ -45,7 +45,7 @@ async function runTask() {
       // 1. 打开任务页面
       console.log('📌 打开任务页面');
       await page.goto('https://i.pcbeta.com/home.php?mod=task&item=new', { timeout: 60000 });
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(20000);
 
       // ==============================================
       // ✅ 任务1：兼容 id=1~1000 的所有立即申请
