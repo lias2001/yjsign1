@@ -47,13 +47,9 @@ jobs:
           PC_BETA_COOKIES: ${{ secrets.PC_BETA_COOKIES }}
         run: node scripts/pcbeta-task.js
 
-      # ==============================================
-      # ✅ 上传截图到 GitHub Artifacts
-      # ==============================================
-      - name: 上传点击截图
-        if: always()   # 成功失败都上传
+      - name: 上传截图工件
         uses: actions/upload-artifact@v4
         with:
-          name: 点击截图-${{ github.run_number }}
-          path: screenshots/
-          retention-days: 30   # 保留30天
+          name: task-screenshots
+          path: ./*.png
+          retention-days: 7
