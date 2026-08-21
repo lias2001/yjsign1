@@ -2,16 +2,20 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-// 截图工具函数：鼠标红点 + 按鼠标坐标命名截图
-async function screenshotWithMouseMarker(page, label) {
-    // 无头模式默认鼠标在(0,0)，先移动到屏幕中心 1920*1080
+let snapCounter = 1;
+
+// 截图工具：红点标记，数字序列命名 snap_001.png
+async function screenshotWithMouseMarker(page) {
+    // 鼠标移到屏幕中心
     await page.mouse.move(960, 540);
     const pos = await page.mouse.position();
     const x = Math.round(pos.x);
     const y = Math.round(pos.y);
-    const filename = `mouse_${x}_${y}_${label}.png`;
 
-    // 在页面注入红色圆点标记鼠标位置
+    const filename = `snap_${String(snapCounter).padStart(3, '0')}.png`;
+    snapCounter++;
+
+    // 绘制红色圆点
     await page.evaluate((mx, my) => {
         const oldDot = document.getElementById('__mouse_red_dot');
         if (oldDot) oldDot.remove();
@@ -30,11 +34,9 @@ async function screenshotWithMouseMarker(page, label) {
     }, x, y);
 
     await page.waitForTimeout(300);
-    // 截图保存到工作目录根目录
     await page.screenshot({ path: filename, fullPage: false });
     console.log(`📸 已保存截图: ${filename}`);
 
-    // 删除页面红点
     await page.evaluate(() => {
         const d = document.getElementById('__mouse_red_dot');
         if (d) d.remove();
@@ -42,10 +44,13 @@ async function screenshotWithMouseMarker(page, label) {
 }
 
 async function runTask() {
-    // ========= 启动清理旧截图 =========
+    // 重置截图计数器
+    snapCounter = 1;
+
+    // 清理历史旧截图 snap_*.png
     try {
         const allFiles = fs.readdirSync('.');
-        const oldScreenshots = allFiles.filter(f => f.startsWith('mouse_') && f.endsWith('.png'));
+        const oldScreenshots = allFiles.filter(f => f.startsWith('snap_') && f.endsWith('.png'));
         for (const f of oldScreenshots) {
             fs.unlinkSync(f);
         }
@@ -70,6 +75,7 @@ async function runTask() {
         console.error('❌ Cookie 解析失败 ');
         process.exit(1);
     }
+
     const browser = await chromium.launch({
         headless: true,
         args: [
@@ -82,6 +88,7 @@ async function runTask() {
     const context = await browser.newContext({
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
     });
+
     try {
         await context.addCookies(cookies);
         const page = await context.newPage();
@@ -89,13 +96,12 @@ async function runTask() {
         // 🔥 执行 2 轮
         for (let round = 1; round <= 2; round++) {
             console.log(`\n========== 第 ${round} 轮开始 ==========`);
-            // 1. 打开任务 new 页面【任务1页面】
-            console.log('📌 打开任务页面 ');
+            // 1. 打开任务 new 页面【任务1页面，加载完成立刻截图（点击之前）】
+            console.log('📌 打开任务1页面 ');
             await page.goto('https://i.pcbeta.com/home.php?mod=task&item=new', { timeout: 60000 });
             await page.waitForTimeout(20000);
-
-            // ========== 进入任务1后截图 ==========
-            await screenshotWithMouseMarker(page, `round${round}_after_task1_page`);
+            // 进入任务1页面时截图
+            await screenshotWithMouseMarker(page);
 
             // ✅ 任务 1：兼容 id=1~1000 的所有立即申请
             const task1Btns = page.locator('a.taskbtn[href*="do=apply&id="]');
@@ -118,15 +124,14 @@ async function runTask() {
             await page.goto('https://i.pcbeta.com/home.php?mod=task&item=doing');
             await page.waitForTimeout(2000);
 
-            // 3. 点击回帖打卡福利【任务2跳转】
-            console.log('👉 任务 2：点击【回帖打卡福利】');
+            // 3. 跳转任务2页面，加载完成立刻截图（点击之后页面跳转完成，截图）
+            console.log('👉 点击【回帖打卡福利】');
             await page.click('a:has-text("回帖打卡福利")', { timeout: 10000 });
             await page.waitForLoadState('domcontentloaded');
             await page.waitForTimeout(3000);
-            console.log('🌐 任务 2 页面 URL:', page.url());
-
-            // ========== 进入任务2页面后截图 ==========
-            await screenshotWithMouseMarker(page, `round${round}_after_task2_page`);
+            console.log('🌐 任务2页面 URL:', page.url());
+            // 进入任务2页面时截图
+            await screenshotWithMouseMarker(page);
 
             // 4. 定位第 2 个【加粗打卡专用】链接
             console.log('👉 定位第 2 个【加粗打卡专用】链接...');
@@ -172,11 +177,7 @@ async function runTask() {
                 console.log('ℹ️ 奖励已领取或无需领取 ');
             });
 
-            // ========== 当前轮次全部任务结束后截图 ==========
-            await screenshotWithMouseMarker(page, `round${round}_task_end`);
-
             console.log(`✅ 第 ${round} 轮完成`);
-            // 两轮之间休息一下
             if (round < 2) {
                 console.log('⏳ 休息 3 秒后开始下一轮...');
                 await page.waitForTimeout(3000);
