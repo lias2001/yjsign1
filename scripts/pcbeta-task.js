@@ -4,13 +4,9 @@ const path = require('path');
 
 // 截图工具函数：鼠标红点 + 按鼠标坐标命名截图
 async function screenshotWithMouseMarker(page, label) {
-    // 获取鼠标坐标
-    const mousePos = await page.evaluate(() => {
-        return { x: window.mouseX ?? 100, y: window.mouseY ?? 100 };
-    });
-    // playwright mouse 真实坐标
-    const m = page.mouse;
-    const pos = await m.position();
+    // 无头模式默认鼠标在(0,0)，先移动到屏幕中心 1920*1080
+    await page.mouse.move(960, 540);
+    const pos = await page.mouse.position();
     const x = Math.round(pos.x);
     const y = Math.round(pos.y);
     const filename = `mouse_${x}_${y}_${label}.png`;
@@ -18,7 +14,7 @@ async function screenshotWithMouseMarker(page, label) {
     // 在页面注入红色圆点标记鼠标位置
     await page.evaluate((mx, my) => {
         const oldDot = document.getElementById('__mouse_red_dot');
-        if(oldDot) oldDot.remove();
+        if (oldDot) oldDot.remove();
         const dot = document.createElement('div');
         dot.id = '__mouse_red_dot';
         dot.style.position = 'fixed';
@@ -34,18 +30,32 @@ async function screenshotWithMouseMarker(page, label) {
     }, x, y);
 
     await page.waitForTimeout(300);
-    // 截图保存
+    // 截图保存到工作目录根目录
     await page.screenshot({ path: filename, fullPage: false });
     console.log(`📸 已保存截图: ${filename}`);
 
-    // 删除红点
+    // 删除页面红点
     await page.evaluate(() => {
         const d = document.getElementById('__mouse_red_dot');
-        if(d) d.remove();
+        if (d) d.remove();
     });
 }
 
 async function runTask() {
+    // ========= 启动清理旧截图 =========
+    try {
+        const allFiles = fs.readdirSync('.');
+        const oldScreenshots = allFiles.filter(f => f.startsWith('mouse_') && f.endsWith('.png'));
+        for (const f of oldScreenshots) {
+            fs.unlinkSync(f);
+        }
+        if (oldScreenshots.length > 0) {
+            console.log(`🧹 清理历史截图 ${oldScreenshots.length} 个`);
+        }
+    } catch (e) {
+        console.log('ℹ️ 无旧截图可清理');
+    }
+
     console.log('✅ 开始执行 PCBeta 每日打卡任务...');
     const cookieEnv = process.env.PC_BETA_COOKIES;
     if (!cookieEnv) {
@@ -87,7 +97,7 @@ async function runTask() {
             // ========== 进入任务1后截图 ==========
             await screenshotWithMouseMarker(page, `round${round}_after_task1_page`);
 
-            // ✅ 任务 1：兼容 id=1~1000 的所有立即申请 【修复选择器多余空格bug】
+            // ✅ 任务 1：兼容 id=1~1000 的所有立即申请
             const task1Btns = page.locator('a.taskbtn[href*="do=apply&id="]');
             const task1Count = await task1Btns.count();
             if (task1Count > 0) {
