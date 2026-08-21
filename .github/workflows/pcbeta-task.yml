@@ -1,9 +1,9 @@
-name: PCBeta 每日打卡 05:00 / 05:30
+name: PCBeta 每6小时打卡
 
 on:
   schedule:
-    - cron: '0 */4 * * *' 
-  workflow_dispatch:       # 允许手动测试运行
+    - cron: '0 */6 * * *'   # UTC时间每6小时执行
+  workflow_dispatch:        # 保留手动触发
 
 jobs:
   run-task:
@@ -12,7 +12,6 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      # 缓存 Node.js 依赖
       - name: 缓存 Node 依赖
         uses: actions/cache@v4
         with:
@@ -23,7 +22,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-node-
 
-      # 缓存 Playwright 浏览器
       - name: 缓存 Playwright 浏览器
         uses: actions/cache@v4
         with:
@@ -50,6 +48,6 @@ jobs:
       - name: 上传截图工件
         uses: actions/upload-artifact@v4
         with:
-          name: task-screenshots
+          name: task‑screenshots
           path: ./*.png
           retention-days: 7
