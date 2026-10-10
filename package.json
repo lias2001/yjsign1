@@ -1,18 +1,16 @@
 {
-  "name": "pcbeta-automation",
+  "name": "pcbeta-checkin",
   "version": "1.0.0",
-  "description": "PCBeta 论坛自动化任务执行工具",
-  "main": "scripts/pcbeta-task.js",
+  "private": true,
+  "description": "PCbeta 打卡：Playwright 定位「打卡专用」文本 -> 鼠标移动 -> 带红点截图，由 GitHub Actions 每 6 小时执行",
   "scripts": {
-    "start": "node scripts/pcbeta-task.js",
-    "test": "node scripts/pcbeta-task.js"
+    "login": "node scripts/generate-cookies.js",
+    "checkin": "node scripts/checkin.js"
   },
   "dependencies": {
-    "playwright": "^1.44.0"
+    "playwright": "^1.64.0"
   },
   "engines": {
-    "node": ">=18.0.0"
-  },
-  "author": "",
-  "license": "MIT"
+    "node": ">=18"
+  }
 }
