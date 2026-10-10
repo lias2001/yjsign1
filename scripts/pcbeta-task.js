@@ -3,25 +3,18 @@ const fs = require('fs');
 
 let snapCounter = 1;
 
-/**
- * 截图函数：清除旧红点，移动鼠标到指定坐标，绘制红点，保存截图
- * 文件名：第n次截图_X_xx_Y_xx.png
- */
 async function screenshotWithMouseMarker(page, targetX, targetY) {
     try {
         console.log(`[DEBUG] 进入截图函数，截图序号=${snapCounter}`);
-
         // 清除旧红点
         await page.evaluate(() => {
             const oldDot = document.getElementById('__mouse_red_dot');
             if (oldDot) oldDot.remove();
         });
 
-        // 移动鼠标到目标坐标
         await page.mouse.move(targetX, targetY);
         const x = Math.round(targetX);
         const y = Math.round(targetY);
-
         const fileName = `第${snapCounter}次截图_X_${x}_Y_${y}.png`;
         snapCounter++;
 
@@ -45,7 +38,6 @@ async function screenshotWithMouseMarker(page, targetX, targetY) {
         await page.screenshot({ path: fileName, fullPage: false });
         console.log(`📸 截图保存成功：${fileName}`);
 
-        // 移除红点
         await page.evaluate(() => {
             const dot = document.getElementById('__mouse_red_dot');
             if (dot) dot.remove();
@@ -56,7 +48,6 @@ async function screenshotWithMouseMarker(page, targetX, targetY) {
 }
 
 async function runTask() {
-    // 清理旧截图
     try {
         const fileList = fs.readdirSync('.');
         const oldPng = fileList.filter(name => name.startsWith('第') && name.endsWith('.png'));
@@ -81,7 +72,6 @@ async function runTask() {
         process.exit(1);
     }
 
-    // 浏览器分辨率2560 x 10055
     const browser = await chromium.launch({
         headless: true,
         args: [
@@ -106,41 +96,27 @@ async function runTask() {
         });
         await page.waitForTimeout(3000);
 
-        // ========== 重点：先找到打卡帖子链接，点进帖子，帖子内部才有 p.xg2【打卡专用】 ==========
-        console.log("🔍 寻找打卡帖子链接（包含'打卡专用'文字的a标签）");
+        // 找到打卡帖子链接
         const postLink = page.locator('a:has-text("打卡专用")').first();
-        try {
-            await postLink.waitFor({timeout:15000, state:'visible'});
-            console.log('✅ 找到打卡帖子链接，点击进入帖子详情页');
-            await postLink.click();
-            await page.waitForLoadState('domcontentloaded');
-            await page.waitForTimeout(4000);
-        }catch(err){
-            throw new Error("找不到打卡帖子链接，无法进入帖子详情页");
-        }
+        await postLink.waitFor({timeout:15000, state:'visible'});
+        console.log('✅ 找到打卡帖子链接，点击进入帖子详情页');
+        await postLink.click();
+        await page.waitForLoadState('domcontentloaded');
+        await page.waitForTimeout(4000);
 
-        // 现在帖子详情页里才有 <p class="xg2">打卡专用</p>
+        // 定位p.xg2
         const targetLocator = page.locator('p.xg2:has-text("打卡专用")').first();
-        let targetX, targetY;
-        try {
-            await targetLocator.waitFor({ timeout: 15000, state: 'visible' });
-            const box = await targetLocator.boundingBox();
-            if (!box) throw new Error('无法获取元素包围盒坐标');
-            targetX = box.x + box.width / 2;
-            targetY = box.y + box.height / 2;
-            console.log(`✅ 识别到【打卡专用】文本，元素中心点坐标：X=${targetX.toFixed(2)} Y=${targetY.toFixed(2)}`);
-        } catch (err) {
-            console.log(`⚠️ 未找到【打卡专用】元素，使用页面中心(1280,5027)作为默认坐标：${err.message}`);
-            targetX = 1280;
-            targetY = 5027;
-        }
+        await targetLocator.waitFor({ timeout: 15000, state: 'visible' });
+        const box = await targetLocator.boundingBox();
+        if (!box) throw new Error('无法获取元素包围盒坐标');
+        const targetX = box.x + box.width / 2;
+        const targetY = box.y + box.height / 2;
+        console.log(`✅ 识别到【打卡专用】文本，元素中心点坐标：X=${targetX.toFixed(2)} Y=${targetY.toFixed(2)}`);
 
-        // 移动鼠标 + 红点截图
         await screenshotWithMouseMarker(page, targetX, targetY);
 
     } catch (globalErr) {
         console.error('❌ 任务全局异常：', globalErr.message);
-        // 兜底截图
         try {
             await screenshotWithMouseMarker(page,1280,5027);
         } catch(e){}
