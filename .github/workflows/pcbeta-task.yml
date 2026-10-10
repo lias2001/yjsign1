@@ -1,34 +1,24 @@
-name: PCBeta 4小时执行任务
+name: PCBeta
 on:
   schedule:
     - cron: '0 */4 * * *'
   workflow_dispatch:
 
 jobs:
-  run-task:
+  run:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
-
-      - name: Install npm
-        run: npm install
-
-      - name: Install chromium
-        run: npx playwright install chromium --with-deps
-
-      - name: Run script
-        env:
+      - run: npm install
+      - run: npx playwright install chromium --with-deps
+      - env:
           PC_BETA_COOKIES: ${{ secrets.PC_BETA_COOKIES }}
         run: node scripts/pcbeta-task.js
-
-      - name: Upload screenshot
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: screenshot
           path: ./*.png
