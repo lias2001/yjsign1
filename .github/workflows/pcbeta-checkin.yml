@@ -1,4 +1,4 @@
-name: PCbeta Check-in
+name: PCbeta Checkin
 
 on:
   schedule:
@@ -58,6 +58,16 @@ jobs:
           # 缓存未命中时才会真正下载 Chromium（约 150MB，只需一次）
           npx playwright install --with-deps chromium
 
+      - name: 计算截图起始序号
+        id: shot
+        run: |
+          # 一次运行最多 5 张截图，按 5 步进，保证跨次运行不重名：
+          # 第 1 次运行 -> 第1~5次截图，第 2 次运行 -> 第6~10次截图 ...
+          # 注意：GitHub Actions 表达式不支持算术运算（+ - * /），只能在 shell 里算。
+          start=$(( (GITHUB_RUN_NUMBER - 1) * 5 + 1 ))
+          echo "start=$start" >> "$GITHUB_OUTPUT"
+          echo "本次截图起始序号：$start（run_number=${GITHUB_RUN_NUMBER}）"
+
       - name: 执行打卡截图脚本
         env:
           # 登录态：仓库 Settings -> Secrets -> Actions 里配置 PCBETA_COOKIES
@@ -82,9 +92,8 @@ jobs:
           # 红点按 50% 缩放
           DOT_SCALE: '0.5'
           DO_CLICK: '1'
-          # 一次运行产出 5 张截图，所以起始序号按 5 递增：
-          # 第 1 次运行 -> 第1~5次截图，第 2 次运行 -> 第6~10次截图 ...
-          SHOT_INDEX_START: ${{ (github.run_number - 1) * 5 + 1 }}
+          # 起始序号由上一步算出
+          SHOT_INDEX_START: ${{ steps.shot.outputs.start }}
         run: node scripts/checkin.js
 
       - name: 上传截图
