@@ -1,55 +1,34 @@
-name: PCBeta 每4小时打卡
-
+name: PCBeta 4小时执行任务
 on:
   schedule:
-    # UTC时区，每4小时执行一次
     - cron: '0 */4 * * *'
   workflow_dispatch:
 
 jobs:
   run-task:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes:15
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: 缓存 Node 依赖
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.npm
-            node_modules
-          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
-
-      - name: 缓存 Playwright 浏览器
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('package.json') }}
-
-      - name: 设置 Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version:20
 
-      - name: 安装依赖
+      - name: Install npm
         run: npm install
 
-      - name: 安装浏览器
+      - name: Install chromium
         run: npx playwright install chromium --with-deps
 
-      - name: 运行打卡任务
+      - name: Run script
         env:
           PC_BETA_COOKIES: ${{ secrets.PC_BETA_COOKIES }}
         run: node scripts/pcbeta-task.js
 
-      - name: 上传截图工件
+      - name: Upload screenshot
         uses: actions/upload-artifact@v4
         with:
-          name: task‑screenshots
+          name: screenshot
           path: ./*.png
-          retention-days: 7
