@@ -1,0 +1,97 @@
+name: PCbeta Check-in
+
+on:
+  schedule:
+    # 每 6 小时执行一次（GitHub Actions 的 cron 用 UTC 时间）
+    # UTC 00:00 / 06:00 / 12:00 / 18:00  ->  北京时间 08:00 / 14:00 / 20:00 / 次日 02:00
+    - cron: '0 */6 * * *'
+  # 支持在 Actions 页面手动点一次跑，方便调试
+  workflow_dispatch:
+
+# 同一个仓库的定时任务串行执行，避免两次运行互相覆盖截图
+concurrency:
+  group: pcbeta-checkin
+  cancel-in-progress: false
+
+jobs:
+  checkin:
+    name: 定位打卡专用 / 回帖打卡福利 并截图
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      # npm 依赖与浏览器缓存都以 package-lock.json 为准：
+      # 只要不升级 playwright，缓存就一直命中
+      CACHE_VERSION: v1
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node（自动缓存 npm 依赖）
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          # 内置缓存：把 ~/.npm 缓存起来，key 跟随 package-lock.json
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: 缓存 Playwright 浏览器
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ env.CACHE_VERSION }}-playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-playwright-${{ runner.os }}-
+
+      - name: 安装依赖
+        env:
+          # 浏览器交给下一步统一装，这里别重复下载
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: npm ci --no-audit --no-fund
+
+      - name: 安装 Playwright Chromium
+        run: |
+          echo "浏览器缓存命中：${{ steps.pw-cache.outputs.cache-hit }}"
+          # 缓存命中时 playwright 会跳过下载，只补齐系统依赖；
+          # 缓存未命中时才会真正下载 Chromium（约 150MB，只需一次）
+          npx playwright install --with-deps chromium
+
+      - name: 执行打卡截图脚本
+        env:
+          # 登录态：仓库 Settings -> Secrets -> Actions 里配置 PCBETA_COOKIES
+          # 内容来自本地 `生成Cookie.bat` / `npm run login` 生成的 auth.json.b64
+          PCBETA_COOKIES: ${{ secrets.PCBETA_COOKIES }}
+          KEYWORD: 打卡专用
+          KEYWORD_DOING: 回帖打卡福利
+          KEYWORD_REPLY: 回复主题
+          KEYWORD_REWARD: 领取奖励
+          VIEWPORT_WIDTH: '2560'
+          VIEWPORT_HEIGHT: '10055'
+          # 鼠标目标点 = 关键字坐标 + 偏移
+          OFFSET1_X: '530'
+          OFFSET1_Y: '60'
+          OFFSET2_X: '530'
+          OFFSET2_Y: '-10'
+          REPLY_OFFSET_X: '-150'
+          REPLY_OFFSET_Y: '0'
+          # 打卡页回复框内容与发表按钮文案
+          REPLY_TEXT: 每日打卡签到
+          REPLY_BUTTON: 发表回复
+          # 红点按 50% 缩放
+          DOT_SCALE: '0.5'
+          DO_CLICK: '1'
+          # 一次运行产出 5 张截图，所以起始序号按 5 递增：
+          # 第 1 次运行 -> 第1~5次截图，第 2 次运行 -> 第6~10次截图 ...
+          SHOT_INDEX_START: ${{ (github.run_number - 1) * 5 + 1 }}
+        run: node scripts/checkin.js
+
+      - name: 上传截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pcbeta-screenshots-${{ github.run_number }}
+          path: screenshots/
+          if-no-files-found: warn
+          retention-days: 30
