@@ -1,13 +1,15 @@
-name: PCBeta 每6小时打卡
+name: PCBeta 每4小时打卡
 
 on:
   schedule:
-    - cron: '0 */6 * * *'   # UTC时间每6小时执行
-  workflow_dispatch:        # 保留手动触发
+    # UTC时区，每4小时执行一次
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
 
 jobs:
   run-task:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
