@@ -50,7 +50,62 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const { reportMissingBrowser } = require('./lib/report-missing-browser');
+/**
+ * Playwright 找不到浏览器时给出可操作的指引，并以退出码 3 结束
+ * （bat / 工作流靠这个退出码判断是否要自动下载浏览器）。
+ *
+ * 说明：这段逻辑是**刻意内联**在这里的，没有抽成公共模块。
+ * 因为本项目的文件是通过 GitHub 网页版编辑器逐个上传维护的，
+ * 少传一个文件就会导致 CI 报 "Cannot find module"。
+ * 保持单文件自包含，改一个文件就能整体生效。
+ */
+function reportMissingBrowser(err) {
+  const msg = String((err && err.message) || err);
+  if (!/Executable doesn't exist|playwright install/i.test(msg)) return false;
+
+  const root = path.join(process.env.LOCALAPPDATA || '', 'ms-playwright');
+  let found = [];
+  try {
+    if (fs.existsSync(root)) {
+      found = fs
+        .readdirSync(root)
+        .filter((n) => /^chromium-\d+$/.test(n))
+        .map((n) => {
+          for (const sub of ['chrome-win64', 'chrome-win']) {
+            const exe = path.join(root, n, sub, 'chrome.exe');
+            if (fs.existsSync(exe)) return exe;
+          }
+          return null;
+        })
+        .filter(Boolean);
+    }
+  } catch (_) {
+    /* 枚举失败不影响主流程 */
+  }
+
+  console.error('');
+  console.error('[错误] 本机没有 Playwright 当前版本需要的 Chromium 浏览器。');
+  console.error('       缺失的路径：');
+  console.error('       ' + msg.split('\n')[0].trim());
+  console.error('');
+  console.error('       任选其一解决：');
+  console.error('');
+  console.error('       A) 下载浏览器（约 200MB，只需一次）：');
+  console.error('            npx playwright install chromium');
+  console.error('');
+  console.error('       B) 复用本机已有的 Chromium，先设置环境变量再运行：');
+  if (found.length) {
+    console.error('            本机已检测到以下 Chromium，复制其中一条即可：');
+    for (const exe of found) console.error('              set CHROMIUM_EXECUTABLE=' + exe);
+  } else {
+    console.error('            set CHROMIUM_EXECUTABLE=<本机 Chromium 的 chrome.exe 完整路径>');
+    console.error('            （未在 ' + root + ' 下找到已安装的 Chromium）');
+  }
+  console.error('');
+
+  process.exit(3);
+  return true;
+}
 
 const TASK_BASE = 'https://i.pcbeta.com/home.php?mod=task&item=';
 const TARGET_URL = process.env.TARGET_URL || TASK_BASE + 'new';
