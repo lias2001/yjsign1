@@ -43,6 +43,13 @@
  *   DO_CLICK         默认 1（点击）；设 0 则只截图不点击
  *   FULL_PAGE        默认 0；设 1 截整页
  *   CHROMIUM_EXECUTABLE  指向本机已有的 Chromium（可选）
+ *   HEADFUL          默认 0；设 1 用有头浏览器（本机调试，可手动过滑块验证）
+ *   CAPTCHA_WAIT_MS  有头模式下检测到风控页时，等待人工完成的毫秒数，默认 120000
+ *   USER_AGENT       覆盖浏览器 UA（默认伪装成 Windows 版 Chrome）
+ *
+ * ⚠ 关于风控：i.pcbeta.com 前面挂着 WAF，机房 IP（比如 GitHub Actions 的美国
+ *   机房）或匿名请求很容易被拦成一张标题为「异常请求验证」的滑块页。
+ *   那一页里当然找不到任何业务关键字，所以脚本会先把它认出来再报错。
  */
 'use strict';
 
@@ -137,6 +144,14 @@ const SHOT_INDEX_START = parseInt(process.env.SHOT_INDEX_START || '1', 10);
 const DO_CLICK = !/^(0|false|no)$/i.test((process.env.DO_CLICK || '1').trim());
 const FULL_PAGE = /^(1|true|yes)$/i.test(process.env.FULL_PAGE || '');
 const CHROMIUM_EXECUTABLE = (process.env.CHROMIUM_EXECUTABLE || '').trim();
+const HEADFUL = /^(1|true|yes)$/i.test(process.env.HEADFUL || '');
+const CAPTCHA_WAIT_MS = parseInt(process.env.CAPTCHA_WAIT_MS || '120000', 10);
+
+// 论坛前面挂着 WAF，Playwright 默认的 Chromium 指纹很容易被判定成机器人，
+// 统一伪装成 Windows 上正常的 Chrome。
+const UA =
+  process.env.USER_AGENT ||
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 const ROOT = path.resolve(__dirname, '..');
 const OUT_DIR = path.join(ROOT, 'screenshots');
@@ -149,17 +164,24 @@ function loadStorageState() {
     const raw = env.startsWith('{') ? env : Buffer.from(env, 'base64').toString('utf8');
     try {
       const state = JSON.parse(raw);
-      console.log('[info] 使用环境变量 PCBETA_COOKIES 中的登录态');
+      const n = state && state.cookies ? state.cookies.length : 0;
+      console.log('[info] 登录态来源：环境变量 PCBETA_COOKIES（cookies ' + n + ' 条）');
+      if (!n) {
+        console.warn('[warn] ⚠ 登录态里一条 cookie 都没有！这等于匿名访问，几乎必被风控拦成人机验证页。');
+        console.warn('       请检查仓库 Settings -> Secrets and variables -> Actions 里的 PCBETA_COOKIES 是否配置正确。');
+      }
       return state;
     } catch (e) {
       throw new Error('PCBETA_COOKIES 不是合法的 JSON / base64(JSON)：' + e.message);
     }
   }
   if (fs.existsSync(AUTH_FILE)) {
-    console.log('[info] 使用本地 auth.json 中的登录态');
-    return JSON.parse(fs.readFileSync(AUTH_FILE, 'utf8'));
+    const st = JSON.parse(fs.readFileSync(AUTH_FILE, 'utf8'));
+    console.log('[info] 登录态来源：本地 auth.json（cookies ' + (st && st.cookies ? st.cookies.length : 0) + ' 条）');
+    return st;
   }
-  console.warn('[warn] 未找到任何登录态，将以游客身份访问（可能被跳转到登录页）');
+  console.warn('[warn] ⚠ 未找到任何登录态（PCBETA_COOKIES 为空，且没有 auth.json），将以游客身份访问。');
+  console.warn('       游客请求会被论坛的风控直接拦成人机验证页，基本跑不出结果。');
   return undefined;
 }
 
@@ -243,6 +265,35 @@ async function clearDot(page) {
   });
 }
 
+/**
+ * 识别「风控 / 人机验证」拦截页。
+ *
+ * 论坛（i.pcbeta.com）前面挂着 WAF：机房 IP（GitHub Actions 跑在美国机房）
+ * 或匿名请求很容易被拦成一张标题为「异常请求验证」的滑块页。
+ * 那一页里当然找不到任何业务关键字，如果不先认出来，
+ * 日志就会误导成「登录态失效 / 关键字文案变了」，白白浪费时间。
+ */
+const BLOCKER_MARKERS = [
+  '异常请求验证',
+  '请完成安全验证',
+  '拖动滑块',
+  '按住滑块',
+  '访问过于频繁',
+  '请求异常',
+];
+
+async function detectBlocker(page) {
+  try {
+    const title = await page.title();
+    const text = await page.evaluate(() => (document.body ? document.body.innerText : '') || '');
+    const marker = BLOCKER_MARKERS.find((m) => title.indexOf(m) !== -1 || text.indexOf(m) !== -1);
+    if (!marker) return null;
+    return { title: title, marker: marker, text: text.replace(/\s+/g, ' ').trim().slice(0, 200) };
+  } catch (_) {
+    return null; // 页面还没就绪时不要误判
+  }
+}
+
 /** 打开页面并等它稳定，滚动归零（保证视口坐标 == 页面坐标） */
 async function openPage(page, url) {
   console.log('\n[step] 打开页面：' + url);
@@ -255,6 +306,29 @@ async function openPage(page, url) {
   await page.waitForTimeout(1500);
   await page.evaluate(() => window.scrollTo(0, 0));
   console.log('[info] 页面标题：' + await page.title());
+
+  // 被 WAF 拦成人机验证页时，先把真相说清楚，并给一次人工通过的机会
+  const blocker = await detectBlocker(page);
+  if (!blocker) return;
+
+  console.warn('[warn] ⚠ 检测到风控 / 人机验证页（命中特征：「' + blocker.marker + '」）');
+  console.warn('       页面正文：' + blocker.text);
+
+  if (HEADFUL && CAPTCHA_WAIT_MS > 0) {
+    console.warn('       有头模式：请在浏览器窗口里手动把滑块拖到最右边，最多等 ' +
+      Math.round(CAPTCHA_WAIT_MS / 1000) + ' 秒…');
+    const deadline = Date.now() + CAPTCHA_WAIT_MS;
+    let passed = false;
+    while (Date.now() < deadline) {
+      await page.waitForTimeout(2000);
+      if (!(await detectBlocker(page))) {
+        passed = true;
+        break;
+      }
+    }
+    console.log(passed ? '[ok] 人机验证已通过，继续后面的流程' : '[warn] 等待超时，仍停留在验证页');
+    await page.evaluate(() => window.scrollTo(0, 0));
+  }
 }
 
 function checkInViewport(x, y) {
@@ -434,8 +508,21 @@ async function notFound(page, keyword, hint) {
   console.error('\n[error] 页面上没有识别到「' + keyword + '」，终止本次流程');
   console.error('        当前地址：' + page.url());
   console.error('        已保存现场截图：' + file);
-  if (hint) console.error('        ' + hint);
-  console.error('        常见原因：登录态失效 / 该步骤已完成过 / 关键字文案变了');
+
+  const blocker = await detectBlocker(page);
+  if (blocker) {
+    console.error('');
+    console.error('        ★★ 真正的原因：这一页根本不是论坛页面，而是风控/人机验证页 ★★');
+    console.error('           命中特征：「' + blocker.marker + '」');
+    console.error('           页面正文：' + blocker.text);
+    console.error('');
+    console.error('           这不是关键字变了，也不是登录态失效，而是请求被 WAF 拦了。');
+    console.error('           最常见的原因：GitHub Actions 跑在境外机房，IP 被判为可疑。');
+    console.error('           见 README「常见问题 -> 页面标题是『异常请求验证』」一节。');
+  } else {
+    if (hint) console.error('        ' + hint);
+    console.error('        常见原因：登录态失效 / 该步骤已完成过 / 关键字文案变了');
+  }
   process.exit(2);
 }
 
@@ -463,7 +550,14 @@ async function main() {
   let browser;
   try {
     browser = await chromium.launch(
-      CHROMIUM_EXECUTABLE ? { headless: true, executablePath: CHROMIUM_EXECUTABLE } : { headless: true }
+      Object.assign(
+        {
+          headless: !HEADFUL,
+          // 关掉最明显的自动化开关，其余靠 addInitScript 抹平
+          args: ['--disable-blink-features=AutomationControlled', '--no-first-run', '--no-default-browser-check'],
+        },
+        CHROMIUM_EXECUTABLE ? { executablePath: CHROMIUM_EXECUTABLE } : {}
+      )
     );
   } catch (err) {
     if (reportMissingBrowser(err)) return;
@@ -474,13 +568,30 @@ async function main() {
     viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
     deviceScaleFactor: 1,
     locale: 'zh-CN',
+    timezoneId: 'Asia/Shanghai',
+    userAgent: UA,
+    extraHTTPHeaders: { 'Accept-Language': 'zh-CN,zh;q=0.9' },
     storageState: storageState,
   });
+
+  // 抹掉常见的「我是自动化工具」特征，降低被风控拦成人机验证的概率
+  await context.addInitScript(() => {
+    try {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh'] });
+      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+      if (!window.chrome) window.chrome = {};
+    } catch (_) {
+      /* 个别页面会冻结 navigator，忽略即可 */
+    }
+  });
+
   let page = await context.newPage();
   page.setDefaultTimeout(60000);
 
   console.log('[info] 视口尺寸：' + VIEWPORT_WIDTH + ' x ' + VIEWPORT_HEIGHT + '   红点尺寸：' + DOT_SIZE + 'px');
   console.log('[info] 点击：' + (DO_CLICK ? '开启' : '关闭（仅截图）'));
+  console.log('[info] 浏览器模式：' + (HEADFUL ? '有头（可人工过验证）' : '无头'));
 
   // ===== 1~2. item=new，识别「打卡专用」 =====
   await openPage(page, TARGET_URL);
